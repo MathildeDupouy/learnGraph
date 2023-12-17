@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from data_loader import synthetic_data_gen
+from initial_synthetic_graphs import synthetic_data_gen
+
 import pdb
 from cvxopt import matrix, solvers
 import networkx as nx
