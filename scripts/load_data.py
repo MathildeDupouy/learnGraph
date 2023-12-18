@@ -26,6 +26,10 @@ geometry = 'geometry'
 DPT_GEOMETRY = "dpt_geometry"
 CENTROID = "CENTROID"
 
+FUELS_BEFORE_2009 = [SUPER_PLOMBE, SUPER_SANS_PLOMB, GAZOLE, FOD, FOL]
+FUELS_AFTER_2009 = [SUPER_SANS_PLOMB_95, SUPER_SANS_PLOMB_95_E10, SUPER_SANS_PLOMB_98, SUPER_SANS_PLOMB, GAZOLE, FOD, FOL]
+
+
 def get_metropole() :
     # Download and read the GeoDataFrame from the provided URL
     url = "https://www.data.gouv.fr/fr/datasets/r/90b9341a-e1f7-4d75-a73c-bbc010c7feeb"
@@ -53,18 +57,17 @@ def get_departement_centroids() :
 
 
 class Fuel_data() :
-    def __init__(self, data_path : str) -> None:
+    def __init__(self, data_path : str, normalize = True) -> None:
         self.data_path = data_path
 
         self.dataframe_fuel = gpd.read_file('../__data/Donnees-annuelles-de-consommation-de-produits-petroliers-par-departement-France-metropol.2022-09.csv', sep=';')
-        self.keys = self.dataframe_fuel.columns.tolist()
 
         # Data first processing
         #Remove all the rows where the department code is not a number
         self.dataframe_fuel = self.dataframe_fuel[self.dataframe_fuel[DEPARTEMENT_CODE].str.isnumeric()]
         #Remove all the rows where the department code is greater than 95
         self.dataframe_fuel = self.dataframe_fuel[self.dataframe_fuel[DEPARTEMENT_CODE].astype(int) <= 96]
-        #Convert the columns department_code, year and fuel consumption to numeric values
+        #Convert the columns department_code, year to numeric values
         self.dataframe_fuel[DEPARTEMENT_CODE] = pd.to_numeric(self.dataframe_fuel[DEPARTEMENT_CODE])
         self.dataframe_fuel[ANNEE] = pd.to_numeric(self.dataframe_fuel[ANNEE])
 
@@ -73,29 +76,41 @@ class Fuel_data() :
         self.dataframe_fuel = self.dataframe_fuel.merge(dataframe_metropole, left_on="DEPARTEMENT_CODE", right_on="DEPARTEMENT_CODE", how="inner")
         self.num_rows = len(self.dataframe_fuel[DEPARTEMENT_CODE])
 
+        # Keys and fuel columns to numeric
+        self.keys = self.dataframe_fuel.columns.tolist()
+        self.identifying_keys = [DEPARTEMENT_CODE, DEPARTEMENT_LIBELLE, REGION_CODE, REGION_LIBELLE, ANNEE, CENTROID, DPT_GEOMETRY, 'geometry']
+        self.fuel_keys = [key for key in self.keys if key not in self.identifying_keys]
+        for key in self.fuel_keys :
+            self.dataframe_fuel[key] = pd.to_numeric(self.dataframe_fuel[key])
+            self.dataframe_fuel[key].fillna(value=0)
+
+        # Normalisation
+        self.normalize_by_year_by_fuel()
+
+        # Compute sizes information
         self.num_dpt = len(set(self.dataframe_fuel[DEPARTEMENT_CODE]))
+        self.num_fuel = len(self.fuel_keys)
         self.num_years = len(set(self.dataframe_fuel[ANNEE]))
+
+    def normalize_by_year_by_fuel(self) :
+        grouped = self.dataframe_fuel.groupby([ANNEE], dropna=False)
+        mean_values = grouped[self.fuel_keys].transform('mean')
+        std_values = grouped[self.fuel_keys].transform('std')
+        self.dataframe_fuel[self.fuel_keys] = (self.dataframe_fuel[self.fuel_keys] - mean_values) / std_values
 
     def truncate(self, keys_to_keep : list = None, dpt_to_keep : list = None) :
         """Truncate the dataframe to keep only the desired variables 
         (the identifying keys are automatically kept)
         """
         # Filter columns
-        identifying_keys = [DEPARTEMENT_CODE, ANNEE, CENTROID, DPT_GEOMETRY]
         if keys_to_keep is not None :
-            self.num_var = len(keys_to_keep)
+            self.num_fuel = len(keys_to_keep)
             for key in keys_to_keep :
                 self.dataframe_fuel[key] = pd.to_numeric(self.dataframe_fuel[key])
                 self.dataframe_fuel[key].fillna(value=0)
-            self.var_keys = [key for key in keys_to_keep] #deep copy
-            keys_to_keep += identifying_keys
+            self.fuel_keys = [key for key in keys_to_keep if key not in self.identifying_keys] #deep copy
+            keys_to_keep += self.identifying_keys
             self.dataframe_fuel = self.dataframe_fuel[keys_to_keep]
-        else :
-            self.num_var = len(self.dataframe_fuel) - len(identifying_keys)
-            self.var_keys = [key for key in self.keys if key not in identifying_keys]
-            for key in self.var_keys :
-                self.dataframe_fuel[key] = pd.to_numeric(self.dataframe_fuel[key])
-                self.dataframe_fuel[key].fillna(value=0)
 
         # Filter lines
         if dpt_to_keep is not None :
@@ -115,16 +130,18 @@ class Fuel_data() :
         self.graph = G
 
     def samples_by_year(self, var_name) -> np.array :
-        """Returns an array of size num_dpt x num years with the value of var_name variable """
+        """Returns an array of size num_dpt x num years with the value of var_name variable\
+            and a list of years """
         samples = self.dataframe_fuel.pivot_table(index='DEPARTEMENT_CODE', columns='ANNEE', values=var_name)
-        return samples.values
+        years = samples.columns.tolist()
+        return samples.values, years
     
     def samples_one_year(self, year) -> np.array :
         """Returns an array of size num_dpt x num_var with the value of a given_year"""
         filtered_df = self.dataframe_fuel[self.dataframe_fuel["ANNEE"] == year]
-        filtered_df = filtered_df[self.var_keys]
+        filtered_df = filtered_df[self.fuel_keys]
         samples = filtered_df.values
-        return samples
+        return samples, self.fuel_keys
     
 def plot_graph_department(g : nx.Graph, node_values : np.array = None, title = "", plot_labels = False) :
     metropole = get_metropole()
@@ -142,21 +159,22 @@ def plot_graph_department(g : nx.Graph, node_values : np.array = None, title = "
         norm = plt.Normalize(vmin=vmin, vmax=vmax)
         nodes = nx.draw_networkx_nodes(g, pos, node_color=node_values, cmap=cmap, node_size=node_size, vmin=vmin, vmax=vmax)
         nodes.set_norm(norm)
-        cbar_ax = fig.add_axes([0.95, 0.2, 0.05, 0.6])  # Adjust position and size as needed
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        cbar = plt.colorbar(sm, cax=cbar_ax)
-        cbar.set_label('Signal amplitude')
     else :
         nodes = nx.draw_networkx_nodes(g, pos, node_size=node_size)
-    nx.draw_networkx_edges(g, pos, width=[g[u][v]['weight'] for u, v in g.edges()])
+    edges_width = [g.edges[u, v]['weight'] for u, v in g.edges()]
+    nx.draw_networkx_edges(g, pos, width=edges_width)
 
     if plot_labels:
         labels = {node: f"({node})" for node in g.nodes()}
         nx.draw_networkx_labels(g, pos, labels=labels, font_color='black')
 
     # Create colorbar axis
-
+    if node_values is not None :
+        cbar_ax = fig.add_axes([0.95, 0.2, 0.05, 0.6])  # Adjust position and size as needed
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, cax=cbar_ax)
+        cbar.set_label('Signal amplitude')
     ax.set_title(title)
     plt.show()
 
