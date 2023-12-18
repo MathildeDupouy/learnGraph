@@ -1,5 +1,6 @@
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import pandas as pd
 import networkx as nx
 import numpy as np
@@ -25,8 +26,7 @@ geometry = 'geometry'
 DPT_GEOMETRY = "dpt_geometry"
 CENTROID = "CENTROID"
 
-def get_departement_centroids() :
-    """See french_fuel script"""
+def get_metropole() :
     # Download and read the GeoDataFrame from the provided URL
     url = "https://www.data.gouv.fr/fr/datasets/r/90b9341a-e1f7-4d75-a73c-bbc010c7feeb"
     geo = gpd.read_file(url)
@@ -36,7 +36,11 @@ def get_departement_centroids() :
 
     # Reproject to a projected CRS
     metropole = metropole.to_crs(epsg=3395)  # Change the EPSG code to an appropriate projected CRS
+    return metropole
 
+def get_departement_centroids() :
+    """See french_fuel script"""
+    metropole= get_metropole()
     # Calculate centroids of department polygons
     metropole['centroid'] = metropole['geometry'].centroid
     #Remove all the rows where the department code is not a number
@@ -71,35 +75,91 @@ class Fuel_data() :
 
         self.num_dpt = len(set(self.dataframe_fuel[DEPARTEMENT_CODE]))
         self.num_years = len(set(self.dataframe_fuel[ANNEE]))
-        print(set(self.dataframe_fuel[ANNEE]))
 
-    def truncate(self, keys_to_keep = list) :
-        """Give only the list of the variable columns you want to keep, not the identifying one"""
-        self.num_var = len(keys_to_keep)
-        for key in keys_to_keep :
-            self.dataframe_fuel[key] = pd.to_numeric(self.dataframe_fuel[key])
-            self.dataframe_fuel[key].fillna(value=0)
-        self.var_keys = [key for key in keys_to_keep] #deep copy
-        keys_to_keep += [DEPARTEMENT_CODE, ANNEE, CENTROID, DPT_GEOMETRY]
-        self.dataframe_fuel = self.dataframe_fuel[keys_to_keep]
+    def truncate(self, keys_to_keep : list = None, dpt_to_keep : list = None) :
+        """Truncate the dataframe to keep only the desired variables 
+        (the identifying keys are automatically kept)
+        """
+        # Filter columns
+        identifying_keys = [DEPARTEMENT_CODE, ANNEE, CENTROID, DPT_GEOMETRY]
+        if keys_to_keep is not None :
+            self.num_var = len(keys_to_keep)
+            for key in keys_to_keep :
+                self.dataframe_fuel[key] = pd.to_numeric(self.dataframe_fuel[key])
+                self.dataframe_fuel[key].fillna(value=0)
+            self.var_keys = [key for key in keys_to_keep] #deep copy
+            keys_to_keep += identifying_keys
+            self.dataframe_fuel = self.dataframe_fuel[keys_to_keep]
+        else :
+            self.num_var = len(self.dataframe_fuel) - len(identifying_keys)
+            self.var_keys = [key for key in self.keys if key not in identifying_keys]
+            for key in self.var_keys :
+                self.dataframe_fuel[key] = pd.to_numeric(self.dataframe_fuel[key])
+                self.dataframe_fuel[key].fillna(value=0)
+
+        # Filter lines
+        if dpt_to_keep is not None :
+            self.dataframe_fuel = self.dataframe_fuel[self.dataframe_fuel[DEPARTEMENT_CODE].isin(dpt_to_keep)]
+            self.num_dpt = len(dpt_to_keep)
+        
 
     def generate_graph(self) :
-        G = nx.graph()
-        for dpt in self.dataframe_fuel[DEPARTEMENT_CODE] :
-            G.add_node(dpt[DEPARTEMENT_CODE])
+        """Generate a graph with a node for each department 
+        and a 'pos' associated to the department centroid"""
+        G = nx.Graph()
+        for code in set(self.dataframe_fuel[DEPARTEMENT_CODE]) :
+            G.add_node(code)
+            # Get the associated 'pos' with a Point object
+            pos_point = self.dataframe_fuel[self.dataframe_fuel[DEPARTEMENT_CODE] == code][CENTROID].unique()[0]
+            G.nodes[code]['pos'] = [pos_point.x, pos_point.y]
         self.graph = G
 
-    def samples_by_year(self, var_name) :
+    def samples_by_year(self, var_name) -> np.array :
         """Returns an array of size num_dpt x num years with the value of var_name variable """
         samples = self.dataframe_fuel.pivot_table(index='DEPARTEMENT_CODE', columns='ANNEE', values=var_name)
         return samples.values
     
-    def samples_one_year(self, year) :
+    def samples_one_year(self, year) -> np.array :
         """Returns an array of size num_dpt x num_var with the value of a given_year"""
         filtered_df = self.dataframe_fuel[self.dataframe_fuel["ANNEE"] == year]
         filtered_df = filtered_df[self.var_keys]
         samples = filtered_df.values
         return samples
+    
+def plot_graph_department(g : nx.Graph, node_values : np.array = None, title = "", plot_labels = False) :
+    metropole = get_metropole()
+
+    # Create figure and axis for the graph
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+    metropole.plot(ax=ax, color='white', edgecolor='black')
+    pos = nx.get_node_attributes(g, 'pos')
+    node_size = 5000 / 96
+    if node_values is not None :
+        # Define a colormap and normalize the node values to it
+        cmap = cm.coolwarm
+        vmin = np.min(node_values)
+        vmax = np.max(node_values)
+        norm = plt.Normalize(vmin=vmin, vmax=vmax)
+        nodes = nx.draw_networkx_nodes(g, pos, node_color=node_values, cmap=cmap, node_size=node_size, vmin=vmin, vmax=vmax)
+        nodes.set_norm(norm)
+        cbar_ax = fig.add_axes([0.95, 0.2, 0.05, 0.6])  # Adjust position and size as needed
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, cax=cbar_ax)
+        cbar.set_label('Signal amplitude')
+    else :
+        nodes = nx.draw_networkx_nodes(g, pos, node_size=node_size)
+    nx.draw_networkx_edges(g, pos, width=[g[u][v]['weight'] for u, v in g.edges()])
+
+    if plot_labels:
+        labels = {node: f"({node})" for node in g.nodes()}
+        nx.draw_networkx_labels(g, pos, labels=labels, font_color='black')
+
+    # Create colorbar axis
+
+    ax.set_title(title)
+    plt.show()
+
 
 
 
