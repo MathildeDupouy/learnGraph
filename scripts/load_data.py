@@ -86,7 +86,7 @@ class Fuel_data() :
             self.dataframe_fuel[key].fillna(value=0)
 
         # Normalisation
-        self.normalize_by_year_by_fuel()
+        # self.normalize_by_year_by_fuel()
 
         # Compute sizes information
         self.num_dpt = len(set(self.dataframe_fuel[DEPARTEMENT_CODE]))
@@ -118,7 +118,6 @@ class Fuel_data() :
             self.dataframe_fuel = self.dataframe_fuel[self.dataframe_fuel[DEPARTEMENT_CODE].isin(dpt_to_keep)]
             self.num_dpt = len(dpt_to_keep)
         
-
     def generate_graph(self) :
         """Generate a graph with a node for each department 
         and a 'pos' associated to the department centroid"""
@@ -146,7 +145,6 @@ class Fuel_data() :
     
 def plot_graph_department(g : nx.Graph, node_values : np.array = None, title = "", plot_labels = False) :
     metropole = get_metropole()
-    print(g.nodes)
     metropole = metropole[metropole["code"].isin(g.nodes)]
 
     # Create figure and axis for the graph
