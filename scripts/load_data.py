@@ -53,7 +53,8 @@ def get_departement_centroids() :
     metropole = metropole[metropole["code"].astype(int) <= 96]
     #Convert the code column to numeric values
     metropole["code"] = pd.to_numeric(metropole["code"])
-    return metropole[["code", "centroid", "geometry"]].rename(columns={"code": DEPARTEMENT_CODE, "centroid": CENTROID, "geometry" : DPT_GEOMETRY})
+    metropole = metropole[["code", "centroid", "geometry"]].rename(columns={"code": DEPARTEMENT_CODE, "centroid": CENTROID, "geometry" : DPT_GEOMETRY})
+    return metropole
 
 
 class Fuel_data() :
