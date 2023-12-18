@@ -40,6 +40,12 @@ def get_metropole() :
 
     # Reproject to a projected CRS
     metropole = metropole.to_crs(epsg=3395)  # Change the EPSG code to an appropriate projected CRS
+    #Remove all the rows where the department code is not a number
+    metropole = metropole[metropole["code"].str.isnumeric()]
+    #Remove all the rows where the department code is greater than 95
+    metropole = metropole[metropole["code"].astype(int) <= 96]
+    #Convert the code column to numeric values
+    metropole["code"] = pd.to_numeric(metropole["code"])
     return metropole
 
 def get_departement_centroids() :
@@ -47,12 +53,6 @@ def get_departement_centroids() :
     metropole= get_metropole()
     # Calculate centroids of department polygons
     metropole['centroid'] = metropole['geometry'].centroid
-    #Remove all the rows where the department code is not a number
-    metropole = metropole[metropole["code"].str.isnumeric()]
-    #Remove all the rows where the department code is greater than 95
-    metropole = metropole[metropole["code"].astype(int) <= 96]
-    #Convert the code column to numeric values
-    metropole["code"] = pd.to_numeric(metropole["code"])
     metropole = metropole[["code", "centroid", "geometry"]].rename(columns={"code": DEPARTEMENT_CODE, "centroid": CENTROID, "geometry" : DPT_GEOMETRY})
     return metropole
 
@@ -146,10 +146,12 @@ class Fuel_data() :
     
 def plot_graph_department(g : nx.Graph, node_values : np.array = None, title = "", plot_labels = False) :
     metropole = get_metropole()
+    print(g.nodes)
+    metropole = metropole[metropole["code"].isin(g.nodes)]
 
     # Create figure and axis for the graph
     fig, ax = plt.subplots(1, 1, figsize=(8, 6))
-    metropole.plot(ax=ax, color='white', edgecolor='black')
+    metropole.plot(ax=ax, color='white', edgecolor='grey')
     pos = nx.get_node_attributes(g, 'pos')
     node_size = 5000 / 96
     if node_values is not None :
@@ -166,8 +168,8 @@ def plot_graph_department(g : nx.Graph, node_values : np.array = None, title = "
     nx.draw_networkx_edges(g, pos, width=edges_width)
 
     if plot_labels:
-        labels = {node: f"({node})" for node in g.nodes()}
-        nx.draw_networkx_labels(g, pos, labels=labels, font_color='black')
+        labels = {node: f"{node}\n\n{metropole[metropole['code'] == node]['nom'].values[0]}" for node in g.nodes()}
+        nx.draw_networkx_labels(g, pos, labels=labels, font_color='grey')
 
     # Create colorbar axis
     if node_values is not None :
