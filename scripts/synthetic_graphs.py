@@ -185,13 +185,24 @@ def diffusion(G, diffusion_strength = 0.1, diffusion_steps = 10, value_range = [
         
     return G
 
-def create_graph_from_laplacian(L, node_start = 0) :
+def create_graph_from_laplacian(L, nodes = 0) :
+    """Create a graph from a Laplacian.
+    nodes : if nodes is a int, the nodes are the list of int starting from nodes ;
+            if nodes is a list, the nodes are this list.
+    """
+    if type(nodes) == int :
+        node_list = [i for i in range(nodes, L.shape[0] + nodes)]
+    elif type(nodes) == list :
+        node_list = nodes
+        assert len(node_list) == L.shape[0]
+    else :
+        raise KeyError("nodes must be an int or a list.")
     G=nx.Graph()
     for i in range(len(L)) :
-        G.add_node(node_start + i)
+        G.add_node(node_list[i])
     for i in range(len(L)) :
         for j in range(i+1, len(L)) :
-            if abs(L[i][j]) > 1e-2 :
-                G.add_edge(node_start + i, node_start + j)
-                G[node_start + i][node_start + j]['weight'] = -L[i][j]
+            if abs(L[i][j]) > 1e-9 :
+                G.add_edge(node_list[i], node_list[j])
+                G[node_list[i]][node_list[j]]['weight'] = -L[i][j]
     return G
