@@ -1,3 +1,5 @@
+# Initial code from https://github.com/TheShadow29/Learn-Graph-Laplacian
+
 import numpy as np
 import networkx as nx
 import pdb

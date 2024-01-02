@@ -1,3 +1,5 @@
+# Initial code from https://github.com/TheShadow29/Learn-Graph-Laplacian
+
 import numpy as np
 import matplotlib.pyplot as plt
 from initial_synthetic_graphs import synthetic_data_gen
